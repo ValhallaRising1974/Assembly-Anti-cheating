@@ -1,0 +1,17 @@
+bits 64
+global checar_integridade_memoria
+
+section .text
+
+checar_integridade_memoria:
+    ; rcx contém o endereço da função C++ que queremos validar
+    ; Compara os primeiros bytes da função para ver se há um "jmp" (0xE9) injetado por cheats
+    mov al, byte [rcx]
+    cmp al, 0xE9            
+    je .modificado          ; Se for igual a 0xE9, a função sofreu Hooking/Injeção
+    mov rax, 1              ; Retorna 1 (Sucesso/Integro)
+    ret
+
+.modificado:
+    xor rax, rax            ; Retorna 0 (Violação detectada)
+    ret
