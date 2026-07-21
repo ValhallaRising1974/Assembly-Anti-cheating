@@ -1,0 +1,121 @@
+; Packed Struct Memory Mapper
+; NASM x86-64 / Linux
+;
+; Estrutura compactada (sem padding):
+; offset 0  : id_versao      (byte  = 1 byte)
+; offset 1  : tipo_pacote    (word  = 2 bytes)
+; offset 3  : comprimento    (dword = 4 bytes)
+; offset 7  : ponteiro_dados (qword = 8 bytes)
+; tamanho total: 15 bytes
+
+BITS 64
+
+%define SYS_EXIT 60
+
+; Offsets calculados pela soma dos campos anteriores
+OFFSET_VERSAO      equ 0
+OFFSET_TIPO        equ 1
+OFFSET_COMPRIMENTO equ 3
+OFFSET_PONTEIRO    equ 7
+TAMANHO_ESTRUTURA  equ 15
+
+section .data
+    align 8
+
+estrutura:
+    id_versao:      db 1
+    tipo_pacote:    dw 0x0200
+    comprimento:    dd 512
+    ponteiro_dados: dq 0x0000000010000000
+
+estrutura_fim:
+
+; Verifica durante a montagem se a estrutura possui 15 bytes.
+%if (estrutura_fim - estrutura) != TAMANHO_ESTRUTURA
+    %error "Tamanho incorreto da estrutura compactada"
+%endif
+
+section .text
+    global _start
+
+_start:
+    ; LEA carrega o endereço da estrutura, não seu conteúdo.
+    lea rbx, [rel estrutura]
+
+    ; ------------------------------------------------------------
+    ; Campo byte: id_versao — offset 0
+    ; ------------------------------------------------------------
+    ; Base + deslocamento.
+    ; MOVZX copia o byte e completa os bits superiores com zeros.
+    movzx eax, byte [rbx + OFFSET_VERSAO]
+
+    ; Endereçamento imediato: constante 1.
+    add eax, 1
+
+    ; AL representa os 8 bits inferiores de RAX.
+    mov byte [rbx + OFFSET_VERSAO], al
+
+    ; ------------------------------------------------------------
+    ; Campo word: tipo_pacote — offset 1
+    ; ------------------------------------------------------------
+    movzx eax, word [rbx + OFFSET_TIPO]
+
+    ; Operação com valor imediato.
+    add eax, 0x0100
+
+    ; AX representa os 16 bits inferiores de RAX.
+    mov word [rbx + OFFSET_TIPO], ax
+
+    ; ------------------------------------------------------------
+    ; Campo dword: comprimento — offset 3
+    ; ------------------------------------------------------------
+    mov eax, dword [rbx + OFFSET_COMPRIMENTO]
+
+    ; Endereçamento/operação por registradores.
+    mov ecx, 2
+    imul eax, ecx
+
+    ; EAX representa os 32 bits inferiores de RAX.
+    mov dword [rbx + OFFSET_COMPRIMENTO], eax
+
+    ; ------------------------------------------------------------
+    ; Campo qword: ponteiro_dados — offset 7
+    ; ------------------------------------------------------------
+    mov rax, qword [rbx + OFFSET_PONTEIRO]
+
+    ; Soma uma constante ao endereço armazenado.
+    add rax, 0x40
+
+    mov qword [rbx + OFFSET_PONTEIRO], rax
+
+    ; ------------------------------------------------------------
+    ; Validação dos valores finais
+    ;
+    ; CMP modifica as flags sem alterar os operandos.
+    ; JNE verifica a Zero Flag: salta quando ZF = 0.
+    ; ------------------------------------------------------------
+    cmp byte [rbx + OFFSET_VERSAO], 2
+    jne .erro
+
+    cmp word [rbx + OFFSET_TIPO], 0x0300
+    jne .erro
+
+    cmp dword [rbx + OFFSET_COMPRIMENTO], 1024
+    jne .erro
+
+    mov rax, qword [rbx + OFFSET_PONTEIRO]
+    mov rdx, 0x0000000010000040
+    cmp rax, rdx
+    jne .erro
+
+.sucesso:
+    ; syscall exit(0)
+    mov eax, SYS_EXIT
+    xor edi, edi
+    syscall
+
+.erro:
+    ; syscall exit(1)
+    mov eax, SYS_EXIT
+    mov edi, 1
+    syscall
