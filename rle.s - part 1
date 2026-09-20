@@ -1,0 +1,38 @@
+Capacity-safe RLE compressor
+.syntax unified
+.cpu cortex-m0
+.thumb
+/*
+* rle_compress
+* r0 = source address
+* r1 = source length in bytes
+* r2 = destination address
+* r3 = destination capacity in bytes
+* Returns:
+* r0 = compressed length in bytes, or 0xFFFFFFFF if capacity is insufficient
+*
+* Output format: repeated pairs [run_count, byte_value].
+* A run is split when its count reaches 255.
+*/
+.section .text.rle_compress, "ax", %progbits
+.align 2
+.global rle_compress
+.type rle_compress, %function
+.thumb_func
+rle_compress:
+push {r4-r7, lr}
+cmp r1, #0
+beq .Lempty
+ldrb r4, [r0]
+adds r0, r0, #1
+subs r1, r1, #1
+movs r5, #1
+movs r6, #0
+.Lscan:
+cmp r1, #0
+beq .Lflush_final
+ldrb r7, [r0]
+cmp r7, r4
+bne .Lflush_continue
+cmp r5, #255
+beq .Lflush_continue
