@@ -1,0 +1,49 @@
+Fixed buffers, application, and embedded test
+.syntax unified
+.cpu cortex-m0
+.thumb
+.equ SEMIHOSTING_SYS_WRITE0, 0x04
+.equ SEMIHOSTING_SYS_EXIT, 0x18
+.equ ADP_STOPPED_APPLICATION_EXIT, 0x20026
+.section .rodata.sensor_seed, "a", %progbits
+.align 2
+sensor_seed:
+.byte 10, 10, 10, 20, 20, 30, 40, 40, 40, 40, 40
+.equ SENSOR_DATA_LEN, . - sensor_seed
+expected_rle:
+.byte 3, 10, 2, 20, 1, 30, 5, 40
+.equ EXPECTED_RLE_LEN, . - expected_rle
+pass_message:
+.asciz "PASS: RLE output = [3,10] [2,20] [1,30] [5,40]\n"
+fail_message:
+.asciz "FAIL: compressed output did not match the expected bytes.\n"
+.section .sensor_buffer, "aw", %nobits
+.global sensor_buffer
+sensor_buffer:
+.space 64
+.section .uart_buffer, "aw", %nobits
+.global uart_buffer
+uart_buffer:
+.space 64
+.section .bss.results, "aw", %nobits
+.align 2
+.global compressed_length
+compressed_length:
+.space 4
+.global test_status
+test_status:
+.space 4
+.section .text.main, "ax", %progbits
+.align 2
+.global main
+.type main, %function
+.thumb_func
+main:
+push {r4-r7, lr}
+/* Seed the fixed ADC buffer used by this simulated environment. */
+ldr r0, =sensor_seed
+ldr r1, =sensor_buffer
+movs r2, #SENSOR_DATA_LEN
+.Lseed:
+ldrb r3, [r0]
+strb r3, [r1]
