@@ -1,0 +1,35 @@
+Capacity-safe RLE compressor
+adds r5, r5, #1
+adds r0, r0, #1
+subs r1, r1, #1
+b .Lscan
+.Lflush_continue:
+cmp r3, #2
+blo .Lno_space
+strb r5, [r2]
+strb r4, [r2, #1]
+adds r2, r2, #2
+subs r3, r3, #2
+adds r6, r6, #2
+mov r4, r7
+movs r5, #1
+adds r0, r0, #1
+subs r1, r1, #1
+b .Lscan
+.Lflush_final:
+cmp r3, #2
+blo .Lno_space
+strb r5, [r2]
+strb r4, [r2, #1]
+adds r6, r6, #2
+mov r0, r6
+pop {r4-r7, pc}
+.Lno_space:
+movs r0, #0
+subs r0, r0, #1
+pop {r4-r7, pc}
+.Lempty:
+movs r0, #0
+pop {r4-r7, pc}
+.size rle_compress, . - rle_compress
+.section .note.GNU-stack, "", %progbits
