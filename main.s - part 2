@@ -1,0 +1,50 @@
+Fixed buffers, application, and embedded test
+adds r0, r0, #1
+adds r1, r1, #1
+subs r2, r2, #1
+bne .Lseed
+ldr r0, =sensor_buffer
+movs r1, #SENSOR_DATA_LEN
+ldr r2, =uart_buffer
+movs r3, #64
+bl rle_compress
+ldr r1, =compressed_length
+str r0, [r1]
+cmp r0, #0
+bmi .Lfailed
+cmp r0, #EXPECTED_RLE_LEN
+bne .Lfailed
+ldr r1, =uart_buffer
+ldr r2, =expected_rle
+movs r3, #EXPECTED_RLE_LEN
+.Lverify:
+ldrb r4, [r1]
+ldrb r5, [r2]
+cmp r4, r5
+bne .Lfailed
+adds r1, r1, #1
+adds r2, r2, #1
+subs r3, r3, #1
+bne .Lverify
+ldr r1, =test_status
+movs r0, #0
+str r0, [r1]
+ldr r1, =pass_message
+b .Lreport
+.Lfailed:
+ldr r1, =test_status
+movs r0, #1
+str r0, [r1]
+ldr r1, =fail_message
+.Lreport:
+movs r0, #SEMIHOSTING_SYS_WRITE0
+bkpt 0xAB
+/* Exit QEMU through ARM semihosting. */
+ldr r1, =ADP_STOPPED_APPLICATION_EXIT
+movs r0, #SEMIHOSTING_SYS_EXIT
+bkpt 0xAB
+.Lhalt:
+wfi
+b .Lhalt
+.size main, . - main
+.section .note.GNU-stack, "", %progbits
