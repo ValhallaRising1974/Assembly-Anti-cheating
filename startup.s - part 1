@@ -1,0 +1,38 @@
+Vector table and reset-time initialization
+.syntax unified
+.cpu cortex-m0
+.thumb
+.section .isr_vector, "a", %progbits
+.align 2
+.global g_pfnVectors
+.type g_pfnVectors, %object
+g_pfnVectors:
+.word _estack
+.word Reset_Handler
+.word Default_Handler
+.word HardFault_Handler
+.word Default_Handler
+.word Default_Handler
+.word Default_Handler
+.word 0
+.word 0
+.word 0
+.word 0
+.word Default_Handler
+.word Default_Handler
+.word 0
+.word Default_Handler
+.word Default_Handler
+.size g_pfnVectors, . - g_pfnVectors
+.section .text.Reset_Handler, "ax", %progbits
+.align 2
+.global Reset_Handler
+.type Reset_Handler, %function
+.thumb_func
+Reset_Handler:
+/* Copy initialized data from its Flash load address to RAM. */
+ldr r0, =_sidata
+ldr r1, =_sdata
+ldr r3, =_edata
+1:
+cmp r1, r3
