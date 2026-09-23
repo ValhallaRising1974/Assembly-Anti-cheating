@@ -1,0 +1,106 @@
+; ============================================================
+; memory.asm
+; memcpy e memset usando instruções de string
+; NASM x86-64
+; ============================================================
+
+default rel
+
+section .text
+
+global memcpy
+global memset
+
+; ------------------------------------------------------------
+; void *memcpy(void *dest, const void *src, size_t n)
+;
+; RDI = destino
+; RSI = origem
+; RDX = quantidade
+;
+; Retorna:
+;   RAX = destino
+;
+; Trata sobreposição.
+; ------------------------------------------------------------
+
+memcpy:
+
+    mov     rax, rdi          ; valor de retorno
+
+    test    rdx, rdx
+    jz      .done
+
+    ; se destino < origem
+    cmp     rdi, rsi
+    jb      .forward
+
+    ; se destino >= origem+n
+    mov     rcx, rsi
+    add     rcx, rdx
+    cmp     rdi, rcx
+    jae     .forward
+
+;------------------------------------------------
+; Cópia reversa (há sobreposição)
+;------------------------------------------------
+
+.backward:
+
+    lea     rsi,[rsi+rdx-1]
+    lea     rdi,[rdi+rdx-1]
+
+    std
+
+    mov     rcx,rdx
+    rep movsb
+
+    cld
+
+    ret
+
+;------------------------------------------------
+; Cópia direta
+;------------------------------------------------
+
+.forward:
+
+    cld
+
+    mov     rcx,rdx
+    rep movsb
+
+.done:
+
+    ret
+
+
+; ------------------------------------------------------------
+; void *memset(void *dest, int value, size_t n)
+;
+; RDI = destino
+; RSI = valor
+; RDX = tamanho
+;
+; Retorna:
+;   RAX = destino
+; ------------------------------------------------------------
+
+memset:
+
+    mov     rax,rdi
+
+    test    rdx,rdx
+    jz      .finish
+
+    cld
+
+    mov     al,sil
+    mov     rcx,rdx
+
+    rep stosb
+
+.finish:
+
+    mov     rax,rdi
+    ret
