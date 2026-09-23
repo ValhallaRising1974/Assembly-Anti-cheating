@@ -1,0 +1,250 @@
+===== macros.inc =====
+
+; ============================================================================
+; macros.inc
+; Biblioteca de macros modular para NASM x86-64
+; Versao: 1.0.0
+; Data: 2026-08-18
+; Objetivo: demonstrar include guard, macros parametrizadas, rotulos locais
+;           e montagem condicional Linux/Windows.
+; ============================================================================
+
+%ifndef MACROS_INC
+%define MACROS_INC
+
+; ----------------------------------------------------------------------------
+; Selecao condicional de plataforma
+; Defina exatamente um simbolo na linha de comando:
+;   -DLINUX
+;   -DWINDOWS
+; ----------------------------------------------------------------------------
+
+%ifdef LINUX
+
+    ; System V AMD64:
+    ; Caller-saved: RAX, RCX, RDX, RSI, RDI, R8-R11.
+    ; RAX e propositalmente omitido para preservar o valor de retorno.
+    %macro PUSH_CALLER_SAVED 0
+        push rcx
+        push rdx
+        push rsi
+        push rdi
+        push r8
+        push r9
+        push r10
+        push r11
+    %endmacro
+
+    %macro POP_CALLER_SAVED 0
+        pop r11
+        pop r10
+        pop r9
+        pop r8
+        pop rdi
+        pop rsi
+        pop rdx
+        pop rcx
+    %endmacro
+
+%elifdef WINDOWS
+
+    ; Windows x64:
+    ; Caller-saved: RAX, RCX, RDX, R8-R11.
+    ; RAX e propositalmente omitido para preservar o valor de retorno.
+    %macro PUSH_CALLER_SAVED 0
+        push rcx
+        push rdx
+        push r8
+        push r9
+        push r10
+        push r11
+    %endmacro
+
+    %macro POP_CALLER_SAVED 0
+        pop r11
+        pop r10
+        pop r9
+        pop r8
+        pop rdx
+        pop rcx
+    %endmacro
+
+%else
+    %error "Defina a plataforma com -DLINUX ou -DWINDOWS"
+%endif
+
+; ----------------------------------------------------------------------------
+; ZERO_BLOCK ponteiro, tamanho
+; Zera 'tamanho' bytes a partir do endereco contido em 'ponteiro'.
+;
+; Parametros:
+;   %1 = registrador contendo ponteiro para o buffer
+;   %2 = tamanho em bytes (imediato ou registrador)
+;
+; Clobbers:
+;   RCX
+;
+; Observacao:
+;   %%zero_loop e %%zero_done sao rotulos locais unicos para cada expansao.
+; ----------------------------------------------------------------------------
+%macro ZERO_BLOCK 2
+    mov rcx, %2
+
+%%zero_loop:
+    test rcx, rcx
+    jz %%zero_done
+
+    dec rcx
+    mov byte [%1 + rcx], 0
+    jmp %%zero_loop
+
+%%zero_done:
+%endmacro
+
+; ----------------------------------------------------------------------------
+; APPLY_MASK registrador, mascara
+; Aplica uma mascara bitwise AND ao registrador indicado.
+;
+; Parametros:
+;   %1 = registrador de destino
+;   %2 = mascara imediata ou registrador
+; ----------------------------------------------------------------------------
+%macro APPLY_MASK 2
+    and %1, %2
+%endmacro
+
+%endif ; MACROS_INC
+
+
+===== main.asm =====
+
+; ============================================================================
+; main.asm
+; Modulo principal de demonstracao
+; NASM x86-64
+; ============================================================================
+
+%include "macros.inc"
+
+global _start
+global process_stub
+
+extern helper_add
+
+BUFFER_SIZE equ 16
+FILTER_MASK equ 0x000000FF
+
+section .data
+    status_byte     db  1
+    buffer_words    dw  BUFFER_SIZE
+    sample_values   dd  0x12345678, 0xABCDEF01, 0x0000FFFF
+    mask_value      dd  FILTER_MASK
+
+section .bss
+    scratch_a       resb BUFFER_SIZE
+    scratch_b       resb BUFFER_SIZE
+
+section .text
+
+; ----------------------------------------------------------------------------
+; process_stub
+; Demonstra:
+;   - uso de macros compartilhadas
+;   - expansao repetida de macro com rotulos locais
+;   - chamada de simbolo EXTERN
+;   - codigo condicional por plataforma
+;
+; Retorno:
+;   RAX = 42
+; ----------------------------------------------------------------------------
+process_stub:
+    PUSH_CALLER_SAVED
+
+    ; As duas chamadas abaixo expandem ZERO_BLOCK com rotulos internos distintos.
+    lea rdi, [rel scratch_a]
+    ZERO_BLOCK rdi, BUFFER_SIZE
+
+    lea rdi, [rel scratch_b]
+    ZERO_BLOCK rdi, BUFFER_SIZE
+
+    ; Exemplo de macro parametrizada sem rotulo local.
+    mov eax, [rel sample_values]
+    APPLY_MASK eax, FILTER_MASK
+
+%ifdef LINUX
+    ; System V AMD64: primeiros argumentos inteiros em RDI, RSI.
+    mov rdi, 20
+    mov rsi, 22
+    call helper_add
+
+%elifdef WINDOWS
+    ; Windows x64: primeiros argumentos inteiros em RCX, RDX.
+    ; O chamador tambem reserva 32 bytes de shadow space.
+    mov rcx, 20
+    mov rdx, 22
+    sub rsp, 32
+    call helper_add
+    add rsp, 32
+%endif
+
+    POP_CALLER_SAVED
+    ret
+
+; ----------------------------------------------------------------------------
+; _start
+; Ponto de entrada usado apenas no build/link Linux deste exercicio.
+; O ramo WINDOWS e validado em nivel de montagem, sem link completo.
+; ----------------------------------------------------------------------------
+_start:
+%ifdef LINUX
+    call process_stub
+
+    ; exit(0)
+    mov eax, 60
+    xor edi, edi
+    syscall
+%else
+    ; Marcador neutro para permitir montagem do ramo WINDOWS em ELF64.
+    ; Nao e usado para produzir um executavel Windows neste exercicio.
+    ret
+%endif
+
+
+===== helper.asm =====
+
+; ============================================================================
+; helper.asm
+; Modulo auxiliar vinculado ao main.asm
+; NASM x86-64
+; ============================================================================
+
+global helper_add
+
+section .text
+
+; ----------------------------------------------------------------------------
+; helper_add
+; Soma dois inteiros de 64 bits.
+;
+; Linux / System V AMD64:
+;   arg1 = RDI
+;   arg2 = RSI
+;
+; Windows x64:
+;   arg1 = RCX
+;   arg2 = RDX
+;
+; Retorno:
+;   RAX = arg1 + arg2
+; ----------------------------------------------------------------------------
+helper_add:
+%ifdef LINUX
+    mov rax, rdi
+    add rax, rsi
+%elifdef WINDOWS
+    mov rax, rcx
+    add rax, rdx
+%else
+    %error "Defina a plataforma com -DLINUX ou -DWINDOWS"
+%endif
+    ret
