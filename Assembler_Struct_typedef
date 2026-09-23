@@ -1,0 +1,142 @@
+typedef struct {
+    uint8_t  version;       // offset 0
+    uint8_t  sensor_type;   // offset 1
+    uint16_t payload_size;  // offset 2
+    uint8_t  checksum;      // offset 4
+} PacketHeader;
+
+typedef struct {
+    uint8_t  version;
+    uint8_t  sensor_type;
+    uint16_t payload_size;
+} ParsedHeader;
+
+int parse_packet(
+    const PacketHeader *header,
+    const uint8_t *payload,
+    uint64_t received_size,
+    ParsedHeader *output
+);
+
+; ============================================================
+; Parser de pacote IoT com validação de checksum
+; NASM/YASM x86-64 - System V AMD64 ABI
+;
+; Argumentos:
+;   RDI = ponteiro para PacketHeader
+;   RSI = ponteiro para o payload
+;   RDX = tamanho real recebido do payload
+;   RCX = ponteiro para ParsedHeader de saída
+;
+; Retorno em EAX:
+;    0 = sucesso
+;   -1 = ponteiro nulo
+;   -2 = tamanho do payload inválido
+;   -3 = checksum inválido
+; ============================================================
+
+section .text
+global parse_packet
+
+; Offsets de PacketHeader
+HEADER_VERSION      equ 0
+HEADER_SENSOR_TYPE  equ 1
+HEADER_PAYLOAD_SIZE equ 2
+HEADER_CHECKSUM     equ 4
+
+; Offsets de ParsedHeader
+OUTPUT_VERSION      equ 0
+OUTPUT_SENSOR_TYPE  equ 1
+OUTPUT_PAYLOAD_SIZE equ 2
+
+parse_packet:
+
+    ; --------------------------------------------------------
+    ; Verificação de ponteiros nulos
+    ; --------------------------------------------------------
+
+    test rdi, rdi
+    jz .null_pointer
+
+    test rsi, rsi
+    jz .null_pointer
+
+    test rcx, rcx
+    jz .null_pointer
+
+    ; --------------------------------------------------------
+    ; Extração dos campos usando base + deslocamento
+    ; --------------------------------------------------------
+
+    movzx eax, byte [rdi + HEADER_VERSION]
+    mov byte [rcx + OUTPUT_VERSION], al
+
+    movzx eax, byte [rdi + HEADER_SENSOR_TYPE]
+    mov byte [rcx + OUTPUT_SENSOR_TYPE], al
+
+    movzx r8d, word [rdi + HEADER_PAYLOAD_SIZE]
+    mov word [rcx + OUTPUT_PAYLOAD_SIZE], r8w
+
+    ; --------------------------------------------------------
+    ; Compara o tamanho declarado com o tamanho recebido
+    ; --------------------------------------------------------
+
+    cmp r8, rdx
+    jne .invalid_size
+
+    ; --------------------------------------------------------
+    ; Calcula checksum:
+    ; soma dos bytes do payload módulo 256
+    ;
+    ; R9  = índice
+    ; R10 = acumulador
+    ; --------------------------------------------------------
+
+    xor r9, r9
+    xor r10d, r10d
+
+.checksum_loop:
+
+    cmp r9, rdx
+    jae .checksum_done
+
+    ; Endereçamento indexado:
+    ; payload[index]
+    movzx eax, byte [rsi + r9 * 1]
+
+    add r10d, eax
+
+    inc r9
+    jmp .checksum_loop
+
+.checksum_done:
+
+    ; Apenas os oito bits inferiores representam o checksum
+    and r10d, 0FFh
+
+    movzx eax, byte [rdi + HEADER_CHECKSUM]
+
+    cmp r10b, al
+    jne .invalid_checksum
+
+    ; Sucesso
+    xor eax, eax
+    ret
+
+.null_pointer:
+    mov eax, -1
+    ret
+
+.invalid_size:
+    mov eax, -2
+    ret
+
+.invalid_checksum:
+    mov eax, -3
+    ret
+
+[registrador_base + offset]
+
+movzx eax, byte [rdi + HEADER_VERSION]
+movzx eax, byte [rsi + r9 * 1]
+
