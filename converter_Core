@@ -1,0 +1,332 @@
+; ============================================================
+; Conversor de bases em Assembly x86-64
+;
+; Entrada:
+;   Número decimal sem sinal pela linha de comando.
+;
+; Saída:
+;   Representação binária e hexadecimal.
+;
+; Ambiente:
+;   Linux x86-64
+;   NASM + GNU ld
+;
+; Montagem:
+;   nasm -f elf64 conversor.asm -o conversor.o
+;
+; Linkedição:
+;   ld conversor.o -o conversor
+;
+; Execução:
+;   ./conversor 42
+; ============================================================
+
+BITS 64
+
+section .data
+
+    mensagem_uso:
+        db "Uso: ./conversor <numero_decimal>", 10
+    tamanho_uso equ $ - mensagem_uso
+
+    mensagem_invalida:
+        db "Erro: informe somente algarismos decimais.", 10
+    tamanho_invalida equ $ - mensagem_invalida
+
+    mensagem_overflow:
+        db "Erro: o numero ultrapassa o limite de 64 bits.", 10
+    tamanho_overflow equ $ - mensagem_overflow
+
+    rotulo_binario:
+        db "Binario:     0b"
+    tamanho_rotulo_binario equ $ - rotulo_binario
+
+    rotulo_hexadecimal:
+        db "Hexadecimal: 0x"
+    tamanho_rotulo_hexadecimal equ $ - rotulo_hexadecimal
+
+    nova_linha:
+        db 10
+
+    ; Tabela usada na conversão para qualquer base até 16.
+    tabela_digitos:
+        db "0123456789ABCDEF"
+
+
+section .bss
+
+    ; Um número de 64 bits pode ocupar até 64 caracteres em binário.
+    ; Reservamos espaço adicional por segurança.
+    buffer:
+        resb 66
+
+    buffer_fim:
+
+
+section .text
+
+    global _start
+
+
+; ============================================================
+; Macro: ESCREVER_TEXTO
+;
+; Escreve uma mensagem cujo endereço e tamanho são conhecidos
+; durante a montagem.
+;
+; Uso:
+;   ESCREVER_TEXTO rotulo, tamanho
+; ============================================================
+
+%macro ESCREVER_TEXTO 2
+
+    mov rax, 1              ; syscall: sys_write
+    mov rdi, 1              ; descritor: stdout
+    lea rsi, [rel %1]       ; endereço da mensagem
+    mov rdx, %2             ; quantidade de bytes
+    syscall
+
+%endmacro
+
+
+; ============================================================
+; Macro: ESCREVER_BUFFER
+;
+; Escreve dados cujo endereço e tamanho estão em registradores.
+;
+; Uso:
+;   ESCREVER_BUFFER rsi, rdx
+; ============================================================
+
+%macro ESCREVER_BUFFER 2
+
+    mov rax, 1              ; syscall: sys_write
+    mov rdi, 1              ; descritor: stdout
+    mov rsi, %1             ; endereço dos dados
+    mov rdx, %2             ; tamanho dos dados
+    syscall
+
+%endmacro
+
+
+; ============================================================
+; Macro: MOSTRAR_BASE
+;
+; Exibe um rótulo e converte o número armazenado em R12.
+;
+; Parâmetros:
+;   1 - rótulo
+;   2 - tamanho do rótulo
+;   3 - base numérica
+;
+; Exemplo:
+;   MOSTRAR_BASE rotulo_binario, tamanho_rotulo_binario, 2
+; ============================================================
+
+%macro MOSTRAR_BASE 3
+
+    ESCREVER_TEXTO %1, %2
+
+    mov rax, r12            ; número a converter
+    mov rbx, %3             ; base desejada
+    lea rdi, [rel buffer_fim]
+
+    call converter_base
+
+    ; A função retorna:
+    ; RSI = início do texto convertido
+    ; RDX = quantidade de caracteres
+    ESCREVER_BUFFER rsi, rdx
+
+    ESCREVER_TEXTO nova_linha, 1
+
+%endmacro
+
+
+; ============================================================
+; Ponto de entrada
+; ============================================================
+
+_start:
+
+    ; No início do programa:
+    ;
+    ; [rsp]      = argc
+    ; [rsp + 8]  = argv[0]
+    ; [rsp + 16] = argv[1]
+
+    mov rax, [rsp]           ; argc
+    cmp rax, 2
+    jne erro_uso
+
+    mov rsi, [rsp + 16]      ; endereço de argv[1]
+
+    ; Não aceita argumento vazio.
+    cmp byte [rsi], 0
+    je erro_invalido
+
+    call decimal_para_u64
+
+    ; RAX contém o número convertido.
+    mov r12, rax
+
+    MOSTRAR_BASE rotulo_binario, tamanho_rotulo_binario, 2
+
+    MOSTRAR_BASE rotulo_hexadecimal, tamanho_rotulo_hexadecimal, 16
+
+    jmp sair_sucesso
+
+
+; ============================================================
+; decimal_para_u64
+;
+; Converte uma string decimal para inteiro sem sinal de 64 bits.
+;
+; Entrada:
+;   RSI = endereço da string
+;
+; Saída:
+;   RAX = número convertido
+;
+; Em caso de caractere inválido ou overflow, o programa salta
+; para a rotina de erro correspondente.
+; ============================================================
+
+decimal_para_u64:
+
+    xor rax, rax             ; resultado acumulado = 0
+
+.loop_decimal:
+
+    movzx rcx, byte [rsi]
+
+    ; Byte zero indica o final da string.
+    test cl, cl
+    jz .fim
+
+    ; Verifica se o caractere está entre '0' e '9'.
+    cmp cl, '0'
+    jb erro_invalido
+
+    cmp cl, '9'
+    ja erro_invalido
+
+    ; Converte o caractere ASCII para valor numérico.
+    sub rcx, '0'
+
+    ; resultado = resultado * 10
+    mov rbx, 10
+    mul rbx                  ; RDX:RAX = RAX * RBX
+
+    ; Se RDX não for zero, houve overflow na multiplicação.
+    test rdx, rdx
+    jnz erro_overflow
+
+    ; resultado = resultado + dígito
+    add rax, rcx
+    jc erro_overflow         ; carry indica overflow
+
+    inc rsi
+    jmp .loop_decimal
+
+.fim:
+
+    ret
+
+
+; ============================================================
+; converter_base
+;
+; Converte um inteiro sem sinal para uma base entre 2 e 16.
+;
+; Entrada:
+;   RAX = número
+;   RBX = base
+;   RDI = endereço imediatamente após o final do buffer
+;
+; Saída:
+;   RSI = endereço do primeiro caractere convertido
+;   RDX = quantidade de caracteres
+;
+; O número é construído de trás para frente no buffer.
+; ============================================================
+
+converter_base:
+
+    ; Guarda o endereço final para calcular o tamanho depois.
+    mov r8, rdi
+
+    ; Tratamento especial para o valor zero.
+    test rax, rax
+    jnz .loop_conversao
+
+    dec rdi
+    mov byte [rdi], '0'
+    jmp .finalizar
+
+.loop_conversao:
+
+    xor rdx, rdx             ; parte alta do dividendo = 0
+    div rbx                  ; RAX = quociente, RDX = resto
+
+    ; O resto representa o próximo dígito.
+    mov rcx, rdx
+
+    dec rdi
+
+    lea r9, [rel tabela_digitos]
+    mov dl, [r9 + rcx]
+    mov [rdi], dl
+
+    ; Continua enquanto o quociente não for zero.
+    test rax, rax
+    jnz .loop_conversao
+
+.finalizar:
+
+    mov rsi, rdi             ; início da string convertida
+
+    mov rdx, r8
+    sub rdx, rdi             ; tamanho = fim - início
+
+    ret
+
+
+; ============================================================
+; Tratamento de erros
+; ============================================================
+
+erro_uso:
+
+    ESCREVER_TEXTO mensagem_uso, tamanho_uso
+    jmp sair_erro
+
+
+erro_invalido:
+
+    ESCREVER_TEXTO mensagem_invalida, tamanho_invalida
+    jmp sair_erro
+
+
+erro_overflow:
+
+    ESCREVER_TEXTO mensagem_overflow, tamanho_overflow
+    jmp sair_erro
+
+
+; ============================================================
+; Encerramento
+; ============================================================
+
+sair_sucesso:
+
+    mov rax, 60             ; syscall: sys_exit
+    xor rdi, rdi            ; código de saída 0
+    syscall
+
+
+sair_erro:
+
+    mov rax, 60             ; syscall: sys_exit
+    mov rdi, 1              ; código de saída 1
+    syscall
